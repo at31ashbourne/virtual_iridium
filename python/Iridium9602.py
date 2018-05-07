@@ -35,6 +35,8 @@ REG_STATUS_DENIED = 3
 LOCKED = 1
 NOT_LOCKED = 0
 
+IRIDIUM_EPOCH = time.mktime((2014,5,11,14,23,55,00,00,-1))  #May 11, 2014, at 14:23:55
+
 echo = True
 binary_rx = False
 binary_rx_incoming_bytes = 0
@@ -187,17 +189,30 @@ def sbdix():
                 received_msg_size = 0
     
         elif ip_enabled:
+            mo_port_list = mo_port.split(",")
+            mo_ip_list = mo_ip.split(",")
+
             if mo_set and not mo_buffer == "":
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 momsn += 1
-                try:
-                    s.connect((mo_ip, mo_port))
-                    s.send(assemble_mo_directip_packet(imei, momsn, mtmsn, mo_buffer))
-                    s.close()
-                except socket.error as msg:
-                    print "Failed to open {}:{}".format(mo_ip, mo_port)
-                    s.close()                
+
+                for mp in mo_port_list:
+                    mip = mo_ip_list[mo_port_list.index(mp)]
+
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    #s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+                    print 'mo_ip {0}:{1} '.format(mip,int(mp))
+                    try:
+                        s.connect((mip, int(mp)))
+                        s.send(assemble_mo_directip_packet(imei, momsn, mtmsn, mo_buffer))
+                        #s.sendto(assemble_mo_directip_packet(imei, momsn, mtmsn, mo_buffer), (mip, mp))
+                        s.close()
+                    except socket.error as msg:
+                        print "Failed to open {0}:{1}".format(mip, int(mp))
+                        s.close()                
+
                 mo_set = False
+
             if len(mt_messages) is not 0:
                 mtmsn += 1
                 mt_set = True
@@ -288,6 +303,10 @@ def do_ok():
     print 'Received blank command'
     send_ok()
 
+def do_unimplemented_ok():
+    print 'Warning unimplemented command'
+    send_ok()
+
 def clear_buffers(buffer):
     global mo_set
     global mt_set
@@ -364,10 +383,11 @@ def which_gateway():
     send_ok()
 
 def get_system_time():
-    return_string = "\r\n---MSSTM: 01002000\r\n"
+    global IRIDIUM_EPOCH
+    diff = int(round((time.time() - IRIDIUM_EPOCH) * 1000 / 90))
+    return_string = "\r\n---MSSTM: "+format(diff, '08x')+"\r\n"
     ser.write(return_string)
     send_ok()
-    print 'We havent actually implemented MSSTM this yet.'
     
 def set_ring_indicator(cmd,start_index):
     global ring_enable
@@ -424,10 +444,53 @@ def get_gmr():
     ser.write(return_string)
     send_ok() 
     
+def do_ati0():
+    return_string = "\n19200\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_ati1():
+    return_string = "\n0000\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_ati2():
+    return_string = "\nOK\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_ati3():
+    return_string = "\nTA10003\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_ati4():
+    return_string = "\nIRIDIUM 9600 FAMILY\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_ati5():
+    return_string = "\n8816\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_ati6():
+    return_string = "\n07X\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_ati7():
+    return_string = "\nBOOT07d2/HW03(9602revE)/04/RAW02\r\n"
+    ser.write(return_string)
+    send_ok() 
+    
+def do_atpg():
+    send_ok() 
+    
 def write_binary_start(cmd,start_index):
     global binary_rx_incoming_bytes
     global binary_rx 
-    
+
     text = cmd[start_index:len(cmd)-1]
     try:
         binary_rx_incoming_bytes = int(text)
@@ -436,10 +499,11 @@ def write_binary_start(cmd,start_index):
             send_ok()
             binary_rx_incoming_bytes = 0
         else:
-            print 'Ready to receive {} bytes'.format(binary_rx_incoming_bytes)
+            print 'Ready to receive {0} bytes'.format(binary_rx_incoming_bytes)
             send_ready()
             binary_rx = True
-    except:
+    except Exception as e:
+        print 'try error',e
         send_error()
 
 def parse_cmd(cmd):
@@ -454,12 +518,17 @@ def parse_cmd(cmd):
     
     if cmd_type == 'at' : do_ok()
     elif cmd_type == 'at+csq'       : get_signal_strength()
+    elif cmd_type == 'at+csqf'      : get_signal_strength()
     elif cmd_type == 'at+csq=?'     : get_valid_rssi()
     elif cmd_type == 'at+culk?'     : get_lock_status()
     elif cmd_type == 'at+gmi'       : get_manufacturer()
+    elif cmd_type == 'at+cgmi'      : get_manufacturer()
     elif cmd_type == 'at+gmm'       : get_model()
+    elif cmd_type == 'at+cgmm'      : get_model()
     elif cmd_type == 'at+gsn'       : get_gsn()
+    elif cmd_type == 'at+cgsn'      : get_gsn()
     elif cmd_type == 'at+gmr'       : get_gmr()
+    elif cmd_type == 'at+cgmr'      : get_gmr()
     elif cmd_type == 'at+sbdwt'     : write_text(cmd,index + 1)
     elif cmd_type == 'at+sbdwb'     : write_binary_start(cmd,index + 1)
     elif cmd_type == 'at+sbdi'      : sbdi()
@@ -481,9 +550,23 @@ def parse_cmd(cmd):
     elif cmd_type == 'ate0' or cmd_type == 'ate': 
         echo = False
         do_ok()
-    elif cmd_type == 'ate1'    : do_ok()
+    elif cmd_type == 'ate1'     : do_ok()
     elif cmd_type == 'at&d0'    : do_ok()
-    elif cmd_type == 'at&k0'    : do_ok()
+    elif cmd_type == 'at+cier'  : do_unimplemented_ok()
+    elif cmd_type == 'at+sbdareg'  : do_unimplemented_ok()
+    elif cmd_type == 'at&f0'    : do_unimplemented_ok()
+    elif cmd_type == 'at&w0'    : do_unimplemented_ok()
+    elif cmd_type == 'at&y0'    : do_unimplemented_ok()
+    elif cmd_type == 'at&k0'    : do_unimplemented_ok()
+    elif cmd_type == 'ati0'     : do_ati0()
+    elif cmd_type == 'ati1'     : do_ati1()
+    elif cmd_type == 'ati2'     : do_ati2()
+    elif cmd_type == 'ati3'     : do_ati3()
+    elif cmd_type == 'ati4'     : do_ati4()
+    elif cmd_type == 'ati5'     : do_ati5()
+    elif cmd_type == 'ati6'     : do_ati6()
+    elif cmd_type == 'ati7'     : do_ati7()
+    elif cmd_type == 'at+pg'    : do_atpg()
     else : send_error()
     
 
@@ -585,8 +668,8 @@ def main():
     parser.add_option("-r", "--recipient", dest="recipient", action="store", help="Destination e-mail address.", metavar="USER")
     parser.add_option("-i", "--in_srv", dest="in_srv", action="store", help="Incoming e-mail server url", metavar="IN_SRV")
     parser.add_option("-o", "--out_srv", dest="out_srv", action="store", help="Outging e-mail server", metavar="OUT_SRV")
-    parser.add_option("--mo_ip", dest="mo_ip", action="store", help="Mobile-originated DirectIP server IP address", metavar="MO_IP", default="127.0.0.1")
-    parser.add_option("--mo_port", dest="mo_port", action="store", help="Mobile-originated DirectIP server Port", metavar="MO_PORT", default=10801)
+    parser.add_option("--mo_ip", dest="mo_ip", action="store", help="Mobile-originated DirectIP server IP address(es)", metavar="MO_IP", default="127.0.0.1")
+    parser.add_option("--mo_port", dest="mo_port", action="store", help="Mobile-originated DirectIP server Port(s)", metavar="MO_PORT", default=10801)
     parser.add_option("--mt_port", dest="mt_port", action="store", help="Mobile-terminated DirectIP server Port", metavar="MT_PORT", default=10800)
     parser.add_option("-m", "--mode", dest="mode", action="store", help="Mode: EMAIL,HTTP_POST,IP,NONE", default="NONE", metavar="MODE")
     parser.add_option("-e", "--imei", dest="imei", action="store", help="IMEI for this modem", default="300234060379270", metavar="MODE")
@@ -606,9 +689,9 @@ def main():
         print 'Not implemented yet'
         sys.exit()
     elif options.mode == "IP":
-        print 'Using IP mode with MO ({}:{}) and MT (0.0.0.0:{}) servers'.format(options.mo_ip, int(options.mo_port), options.mt_port)
+        print 'Using IP mode with MO ({0}:{1}) and MT (0.0.0.0:{2}) servers'.format(options.mo_ip, options.mo_port, options.mt_port)
         server = MobileTerminatedServer('0.0.0.0', mt_port)
-        print "Started MT Server on port {}".format(mt_port)
+        print "Started MT Server on port {0}".format(mt_port)
         sys.stdout.flush()
         ip_enabled = True
     else:
@@ -623,7 +706,7 @@ def main():
     password = options.passwd
 
     mo_ip = options.mo_ip
-    mo_port = int(options.mo_port)
+    mo_port = options.mo_port
     imei = options.imei
 
     now_get_checksum_first = False
@@ -679,14 +762,14 @@ def main():
                 now_get_checksum_second = False
                 #check the checksum
                 if (checksum_first * 256 + checksum_second) == (binary_checksum & (2**16-1)):
-                    print "Good binary checksum"
+                    print "Good binary checksum - send 0"
                     ser.write('\r\n0\r\n')
                     send_ok()
                     mo_buffer = rx_buffer
                     rx_buffer = ''
                     mo_set = True
                 else:
-                    print "Bad binary checksum"
+                    print "Bad binary checksum - send 2"
                     ser.write('\r\n2\r\n')
                     send_ok()
                     rx_buffer = ''
